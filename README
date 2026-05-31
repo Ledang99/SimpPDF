@@ -1,3 +1,16 @@
+This project is a branch from MuPDF Mini Viewer.
+I have added :
+
+1. Annotate for PDF
+2. Highlight for PDF
+
+The reason is because i'm using these 2 function intensively on the pdf.
+
+the below is the original READ.ME file from MuPDF Mini Viewer.
+
+- ledang99 - 
+==============================================================
+
 # MuPDF Mini Viewer
 
 This project is a minimalist Android app that uses the MuPDF library to view
