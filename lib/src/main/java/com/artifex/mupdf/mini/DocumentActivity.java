@@ -37,6 +37,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -45,6 +46,12 @@ import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -97,6 +104,7 @@ public class DocumentActivity extends Activity
 	protected View zoomButton;
 	protected View layoutButton;
 	protected PopupMenu layoutPopupMenu;
+	protected View annotateButton;
 	protected View outlineButton;
 	protected View bottomBar;
 	protected View backgroundLayout;
@@ -115,6 +123,11 @@ public class DocumentActivity extends Activity
 	protected boolean toggledUI;
 	protected Insets systemInsets = Insets.NONE;
 	protected boolean newSearchHitPage;
+
+	protected boolean annotateMode;
+	protected float[] annotateColor = {1, 0, 0};
+	protected Quad[] currentSelectionQuads;
+	protected PopupWindow selectionPopup;
 
 	private String toHex(byte[] digest) {
 		StringBuilder builder = new StringBuilder(2 * digest.length);
@@ -377,6 +390,84 @@ public class DocumentActivity extends Activity
 			}
 		});
 
+		annotateButton = findViewById(R.id.annotate_button);
+		annotateButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				if (annotateMode) {
+					AlertDialog.Builder builder = new AlertDialog.Builder(DocumentActivity.this);
+					builder.setTitle("Annotation");
+					String[] options = {"Save", "Undo Stroke", "Redo Stroke", "Cancel"};
+					builder.setItems(options, new DialogInterface.OnClickListener() {
+						@Override
+						public void onClick(DialogInterface dialog, int which) {
+							switch (which) {
+								case 0: // Save
+									saveAnnotations();
+									break;
+								case 1: // Undo
+									pageView.undoAnnotate();
+									break;
+								case 2: // Redo
+									pageView.redoAnnotate();
+									break;
+								case 3: // Cancel
+									annotateMode = false;
+									pageView.setAnnotateMode(false);
+									((ImageButton)annotateButton).setColorFilter(null);
+									loadPage();
+									break;
+							}
+						}
+					});
+					builder.show();
+				} else {
+					final float[][] colorValues = {{1,0,0}, {1,1,0}, {0,1,0}, {0,0,1}};
+					final int[] androidColors = {0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF0000FF};
+
+					if (selectionPopup != null)
+						selectionPopup.dismiss();
+
+					LinearLayout layout = new LinearLayout(DocumentActivity.this);
+					layout.setOrientation(LinearLayout.HORIZONTAL);
+					layout.setBackgroundColor(0xCCFFFFFF);
+					int padding = (int)(10 * displayDPI / 160);
+					layout.setPadding(padding, padding, padding, padding);
+
+					for (int i = 0; i < androidColors.length; i++) {
+						final int index = i;
+						TextView tv = new TextView(DocumentActivity.this);
+						tv.setText("");
+						tv.setGravity(Gravity.CENTER);
+						GradientDrawable gd = new GradientDrawable();
+						gd.setShape(GradientDrawable.OVAL);
+						gd.setColor(androidColors[i]);
+						int size = (int)(40 * displayDPI / 160);
+						gd.setSize(size, size);
+						tv.setBackground(gd);
+						LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+						lp.setMargins(padding, 0, padding, 0);
+						tv.setLayoutParams(lp);
+						tv.setOnClickListener(new View.OnClickListener() {
+							public void onClick(View v) {
+								annotateColor = colorValues[index];
+								annotateMode = true;
+								pageView.setAnnotateMode(true);
+								pageView.setAnnotateColor(androidColors[index]);
+								((ImageButton)annotateButton).setColorFilter(androidColors[index]);
+								Toast.makeText(DocumentActivity.this, "Annotation mode: ON", Toast.LENGTH_SHORT).show();
+								selectionPopup.dismiss();
+							}
+						});
+						layout.addView(tv);
+					}
+
+					selectionPopup = new PopupWindow(layout, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+					selectionPopup.setOutsideTouchable(true);
+					selectionPopup.showAtLocation(pageView, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, (int)(100 * displayDPI / 160));
+				}
+			}
+		});
+
 		topBar.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
 				public WindowInsets onApplyWindowInsets(View v, WindowInsets windowInsets)
 				{
@@ -399,6 +490,82 @@ public class DocumentActivity extends Activity
 					parent.setSystemGestureExclusionRects(Collections.singletonList(exclusion));
 				}
 			});
+	}
+
+	protected void saveAnnotations() {
+		final Point[][] inkList = pageView.getInkList();
+		if (inkList == null) {
+			annotateMode = false;
+			pageView.setAnnotateMode(false);
+			((ImageButton)annotateButton).setColorFilter(null);
+			return;
+		}
+
+		worker.add(new Worker.Task() {
+			public void work() {
+				PDFDocument pdf = doc.asPDF();
+				if (pdf != null) {
+					PDFPage page = (PDFPage) pdf.loadPage(currentPage);
+					PDFAnnotation annot = page.createAnnotation(PDFAnnotation.TYPE_INK);
+					annot.setInkList(inkList);
+					annot.setColor(annotateColor);
+					annot.update();
+					page.update();
+					page.destroy();
+					saveDocument();
+				}
+			}
+			public void run() {
+				annotateMode = false;
+				pageView.setAnnotateMode(false);
+				((ImageButton)annotateButton).setColorFilter(null);
+				loadPage();
+			}
+		});
+	}
+
+	protected void saveDocument() {
+		final PDFDocument pdf = doc.asPDF();
+		if (pdf != null) {
+			worker.add(new Worker.Task() {
+				boolean success = false;
+				public void work() {
+					Uri uri = getIntent().getData();
+					try {
+						if ("file".equals(uri.getScheme())) {
+							try {
+								pdf.save(uri.getPath(), "incremental");
+							} catch (Exception e) {
+								pdf.save(uri.getPath(), "de-linearize");
+							}
+						} else {
+							ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "rw");
+							FileDescriptorStream stream = new FileDescriptorStream(pfd);
+							try {
+								pdf.save(stream, "incremental");
+							} catch (Exception e) {
+								try { stream.close(); } catch (Exception e2) {}
+								pfd = getContentResolver().openFileDescriptor(uri, "rwt");
+								stream = new FileDescriptorStream(pfd);
+								pdf.save(stream, "de-linearize");
+							} finally {
+								try { stream.close(); } catch (Exception e2) {}
+							}
+						}
+						success = true;
+					} catch (Exception e) {
+						Log.e(APP, "saveDocument: " + e.getMessage());
+					}
+				}
+				public void run() {
+					if (success) {
+						Toast.makeText(DocumentActivity.this, getString(R.string.toast_saved), Toast.LENGTH_SHORT).show();
+					} else {
+						Toast.makeText(DocumentActivity.this, getString(R.string.toast_save_failed), Toast.LENGTH_SHORT).show();
+					}
+				}
+			});
+		}
 	}
 
 	protected void showPageNumber(int pageNumber) {
@@ -484,6 +651,299 @@ public class DocumentActivity extends Activity
 		}
 	}
 
+	public void onSelectionChanged(final float x0, final float y0, final float x1, final float y1) {
+		worker.add(new Worker.Task() {
+			Quad[] quads;
+			public void work() {
+				Page page = doc.loadPage(currentPage);
+				StructuredText st = page.toStructuredText();
+				Matrix ctm;
+				if (fitPage)
+					ctm = AndroidDrawDevice.fitPage(page, canvasW, canvasH);
+				else
+					ctm = AndroidDrawDevice.fitPageWidth(page, canvasW);
+				Matrix inv = new Matrix(ctm).invert();
+				Point p0 = new Point(x0, y0).transform(inv);
+				Point p1 = new Point(x1, y1).transform(inv);
+				if (x0 == x1 && y0 == y1) {
+					Quad q = st.snapSelection(p0, p1, StructuredText.SELECT_WORDS);
+					if (q != null)
+						quads = new Quad[]{q};
+				} else {
+					quads = st.highlight(p0, p1);
+				}
+				st.destroy();
+				if (quads != null) {
+					for (Quad q : quads)
+						q.transform(ctm);
+				}
+				page.destroy();
+			}
+			public void run() {
+				currentSelectionQuads = quads;
+				pageView.setSelection(quads);
+			}
+		});
+	}
+
+	public void onSelectionEnd() {
+		if (currentSelectionQuads != null && currentSelectionQuads.length > 0) {
+			showSelectionMenu();
+		}
+	}
+
+	public boolean onAnnotationLongPress(final float x, final float y) {
+		final PDFDocument pdf = doc.asPDF();
+		if (pdf == null) return false;
+
+		Page page = doc.loadPage(currentPage);
+		Matrix ctm;
+		if (fitPage)
+			ctm = AndroidDrawDevice.fitPage(page, canvasW, canvasH);
+		else
+			ctm = AndroidDrawDevice.fitPageWidth(page, canvasW);
+		final Point p = new Point(x, y).transform(new Matrix(ctm).invert());
+
+		PDFPage pdfPage = (PDFPage) pdf.loadPage(currentPage);
+		PDFAnnotation[] annots = pdfPage.getAnnotations();
+		PDFAnnotation hit = null;
+		if (annots != null) {
+			for (PDFAnnotation annot : annots) {
+				if (annot.getBounds().contains(p.x, p.y)) {
+					hit = annot;
+					break;
+				}
+			}
+		}
+		pdfPage.destroy();
+		page.destroy();
+
+		if (hit != null) {
+			showAnnotationMenu(hit);
+			return true;
+		}
+
+		return false;
+	}
+
+	private void showAnnotationMenu(final PDFAnnotation annot) {
+		if (selectionPopup != null)
+			selectionPopup.dismiss();
+
+		LinearLayout layout = new LinearLayout(this);
+		layout.setOrientation(LinearLayout.HORIZONTAL);
+		layout.setBackgroundColor(0xCCFFFFFF);
+		int padding = (int)(10 * displayDPI / 160);
+		layout.setPadding(padding, padding, padding, padding);
+
+		TextView delete = new TextView(this);
+		delete.setText("X");
+		delete.setGravity(Gravity.CENTER);
+		delete.setTextColor(Color.WHITE);
+		GradientDrawable dgd = new GradientDrawable();
+		dgd.setShape(GradientDrawable.OVAL);
+		dgd.setColor(Color.RED);
+		int size = (int)(40 * displayDPI / 160);
+		dgd.setSize(size, size);
+		delete.setBackground(dgd);
+		LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(size, size);
+		dlp.setMargins(padding, 0, padding, 0);
+		delete.setLayoutParams(dlp);
+		delete.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				deleteAnnotation(annot);
+				selectionPopup.dismiss();
+			}
+		});
+		layout.addView(delete);
+
+		TextView cancel = new TextView(this);
+		cancel.setText("O");
+		cancel.setGravity(Gravity.CENTER);
+		cancel.setTextColor(Color.WHITE);
+		GradientDrawable cgd = new GradientDrawable();
+		cgd.setShape(GradientDrawable.OVAL);
+		cgd.setColor(Color.BLACK);
+		cgd.setSize(size, size);
+		cancel.setBackground(cgd);
+		LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(size, size);
+		clp.setMargins(padding, 0, padding, 0);
+		cancel.setLayoutParams(clp);
+		cancel.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				selectionPopup.dismiss();
+			}
+		});
+		layout.addView(cancel);
+
+		selectionPopup = new PopupWindow(layout, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		selectionPopup.setOutsideTouchable(true);
+		selectionPopup.showAtLocation(pageView, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, (int)(100 * displayDPI / 160));
+	}
+
+	protected void deleteAnnotation(final PDFAnnotation annot) {
+		worker.add(new Worker.Task() {
+			public void work() {
+				PDFDocument pdf = doc.asPDF();
+				if (pdf != null) {
+					PDFPage page = (PDFPage) pdf.loadPage(currentPage);
+					page.deleteAnnotation(annot);
+					page.update();
+					saveDocument();
+					page.destroy();
+				}
+			}
+			public void run() {
+				loadPage();
+			}
+		});
+	}
+
+	public void dismissSelection() {
+		currentSelectionQuads = null;
+		pageView.setSelection(null);
+		if (selectionPopup != null)
+			selectionPopup.dismiss();
+	}
+
+	private void showSelectionMenu() {
+		if (selectionPopup != null)
+			selectionPopup.dismiss();
+
+		LinearLayout layout = new LinearLayout(this);
+		layout.setOrientation(LinearLayout.HORIZONTAL);
+		layout.setBackgroundColor(0xCCFFFFFF);
+		int padding = (int)(10 * displayDPI / 160);
+		layout.setPadding(padding, padding, padding, padding);
+
+		final int[] colors = {0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF0000FF}; // Red, Yellow, Green, Blue
+		final float[][] colorValues = {{1,0,0}, {1,1,0}, {0,1,0}, {0,0,1}};
+
+		for (int i = 0; i < colors.length; i++) {
+			final int index = i;
+			TextView tv = new TextView(this);
+			tv.setText("");
+			tv.setGravity(Gravity.CENTER);
+			GradientDrawable gd = new GradientDrawable();
+			gd.setShape(GradientDrawable.OVAL);
+			gd.setColor(colors[i]);
+			int size = (int)(40 * displayDPI / 160);
+			gd.setSize(size, size);
+			tv.setBackground(gd);
+			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+			lp.setMargins(padding, 0, padding, 0);
+			tv.setLayoutParams(lp);
+			tv.setOnClickListener(new View.OnClickListener() {
+				public void onClick(View v) {
+					highlightSelectedWord(colorValues[index]);
+					selectionPopup.dismiss();
+				}
+			});
+			layout.addView(tv);
+		}
+
+		TextView undo = new TextView(this);
+		undo.setText("U");
+		undo.setGravity(Gravity.CENTER);
+		undo.setTextColor(Color.WHITE);
+		GradientDrawable ugd = new GradientDrawable();
+		ugd.setShape(GradientDrawable.OVAL);
+		ugd.setColor(Color.GRAY);
+		int size = (int)(40 * displayDPI / 160);
+		ugd.setSize(size, size);
+		undo.setBackground(ugd);
+		LinearLayout.LayoutParams ulp = new LinearLayout.LayoutParams(size, size);
+		ulp.setMargins(padding, 0, padding, 0);
+		undo.setLayoutParams(ulp);
+		undo.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				undoLastAnnotation();
+				selectionPopup.dismiss();
+			}
+		});
+		layout.addView(undo);
+
+		TextView cancel = new TextView(this);
+		cancel.setText("X");
+		cancel.setGravity(Gravity.CENTER);
+		cancel.setTextColor(Color.WHITE);
+		GradientDrawable cgd = new GradientDrawable();
+		cgd.setShape(GradientDrawable.OVAL);
+		cgd.setColor(Color.BLACK);
+		cancel.setBackground(cgd);
+		LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(size, size);
+		clp.setMargins(padding, 0, padding, 0);
+		cancel.setLayoutParams(clp);
+		cancel.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				dismissSelection();
+			}
+		});
+		layout.addView(cancel);
+
+		selectionPopup = new PopupWindow(layout, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+		selectionPopup.setOutsideTouchable(true);
+		selectionPopup.showAtLocation(pageView, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, (int)(100 * displayDPI / 160));
+	}
+
+	protected void highlightSelectedWord(final float[] color) {
+		if (currentSelectionQuads == null) return;
+		worker.add(new Worker.Task() {
+			public void work() {
+				PDFDocument pdf = doc.asPDF();
+				if (pdf != null) {
+					Page page = doc.loadPage(currentPage);
+					Matrix ctm;
+					if (fitPage)
+						ctm = AndroidDrawDevice.fitPage(page, canvasW, canvasH);
+					else
+						ctm = AndroidDrawDevice.fitPageWidth(page, canvasW);
+
+					Matrix inv = new Matrix(ctm).invert();
+					Quad[] qs = new Quad[currentSelectionQuads.length];
+					for (int i = 0; i < currentSelectionQuads.length; i++)
+						qs[i] = currentSelectionQuads[i].transformed(inv);
+
+					PDFPage pdfPage = (PDFPage) pdf.loadPage(currentPage);
+					PDFAnnotation annot = pdfPage.createAnnotation(PDFAnnotation.TYPE_HIGHLIGHT);
+					annot.setQuadPoints(qs);
+					annot.setColor(color);
+					annot.update();
+					pdfPage.update();
+					pdfPage.destroy();
+					saveDocument();
+					page.destroy();
+				}
+			}
+			public void run() {
+				dismissSelection();
+				loadPage();
+			}
+		});
+	}
+
+	protected void undoLastAnnotation() {
+		worker.add(new Worker.Task() {
+			public void work() {
+				PDFDocument pdf = doc.asPDF();
+				if (pdf != null) {
+					PDFPage page = (PDFPage) pdf.loadPage(currentPage);
+					PDFAnnotation[] annots = page.getAnnotations();
+					if (annots != null && annots.length > 0) {
+						page.deleteAnnotation(annots[annots.length - 1]);
+						page.update();
+						saveDocument();
+					}
+					page.destroy();
+				}
+			}
+			public void run() {
+				dismissSelection();
+				loadPage();
+			}
+		});
+	}
+
 	protected void openDocument() {
 		worker.add(new Worker.Task() {
 			boolean needsPassword;
@@ -559,6 +1019,12 @@ public class DocumentActivity extends Activity
 	}
 
 	public void onBackPressed() {
+		if (annotateMode) {
+			annotateMode = false;
+			pageView.setAnnotateMode(false);
+			((ImageButton)annotateButton).setColorFilter(null);
+			return;
+		}
 		if (history.empty()) {
 			super.onBackPressed();
 			if (returnToLibraryActivity) {
@@ -688,6 +1154,8 @@ public class DocumentActivity extends Activity
 					layoutButton.setVisibility(View.VISIBLE);
 				else
 					zoomButton.setVisibility(View.VISIBLE);
+				if (doc.asPDF() != null)
+					annotateButton.setVisibility(View.VISIBLE);
 				loadPage();
 				loadOutline();
 			}
@@ -768,6 +1236,7 @@ public class DocumentActivity extends Activity
 			public Rect[] linkBounds;
 			public String[] linkURIs;
 			public Quad[][] hits;
+			public Matrix pageCtm;
 			public void work() {
 				try {
 					Log.i(APP, "load page " + pageNumber);
@@ -778,6 +1247,7 @@ public class DocumentActivity extends Activity
 						ctm = AndroidDrawDevice.fitPage(page, canvasW, canvasH);
 					else
 						ctm = AndroidDrawDevice.fitPageWidth(page, canvasW);
+					pageCtm = new Matrix(ctm);
 					Link[] links = page.getLinks();
 					if (links == null)
 					{
@@ -809,10 +1279,12 @@ public class DocumentActivity extends Activity
 				}
 			}
 			public void run() {
-				if (bitmap != null)
+				if (bitmap != null) {
+					pageView.setPageTransform(pageCtm);
 					pageView.setBitmap(bitmap, zoom, wentBack, toggledUI, newSearchHitPage, linkBounds, linkURIs, hits);
-				else
+				} else {
 					pageView.setError();
+				}
 				showPageNumber(currentPage + 1);
 				pageSeekbar.setMax(pageCount - 1);
 				pageSeekbar.setProgress(pageNumber);

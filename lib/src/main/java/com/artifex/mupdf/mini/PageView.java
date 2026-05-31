@@ -5,6 +5,7 @@ import com.artifex.mupdf.fitz.*;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
@@ -14,6 +15,8 @@ import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.widget.Scroller;
+
+import java.util.ArrayList;
 
 public class PageView extends View implements
 	GestureDetector.OnGestureListener,
@@ -31,7 +34,13 @@ public class PageView extends View implements
 	protected Rect[] linkBounds;
 	protected String[] linkURIs;
 	protected Quad[][] hits;
+	protected Quad[] selectedQuads;
+	protected Paint selectionPaint;
 	protected boolean showLinks;
+
+	protected boolean isSelecting;
+	protected Point selectionStart;
+	protected Point selectionEnd;
 
 	protected GestureDetector detector;
 	protected ScaleGestureDetector scaleDetector;
@@ -41,6 +50,15 @@ public class PageView extends View implements
 	protected Path errorPath;
 	protected Paint linkPaint;
 	protected Paint hitPaint;
+
+	protected boolean annotateMode;
+	protected Paint inkPaint;
+	protected ArrayList<ArrayList<Point>> inkList;
+	protected ArrayList<ArrayList<Point>> redoList;
+	protected ArrayList<Point> currentStroke;
+	protected Matrix ctm;
+	protected Matrix invCtm;
+	private Path tempPath = new Path();
 
 	public PageView(Context ctx, AttributeSet atts) {
 		super(ctx, atts);
@@ -61,6 +79,10 @@ public class PageView extends View implements
 		hitPaint.setARGB(32, 255, 0, 0);
 		hitPaint.setStyle(Paint.Style.FILL);
 
+		selectionPaint = new Paint();
+		selectionPaint.setARGB(64, 0, 128, 255);
+		selectionPaint.setStyle(Paint.Style.FILL);
+
 		errorPaint = new Paint();
 		errorPaint.setARGB(255, 255, 80, 80);
 		errorPaint.setStrokeWidth(5);
@@ -71,6 +93,17 @@ public class PageView extends View implements
 		errorPath.lineTo(100, 100);
 		errorPath.moveTo(100, -100);
 		errorPath.lineTo(-100, 100);
+
+		inkPaint = new Paint();
+		inkPaint.setColor(Color.RED);
+		inkPaint.setStyle(Paint.Style.STROKE);
+		inkPaint.setStrokeWidth(5);
+		inkPaint.setStrokeCap(Paint.Cap.ROUND);
+		inkPaint.setStrokeJoin(Paint.Join.ROUND);
+		inkPaint.setAntiAlias(true);
+
+		inkList = new ArrayList<>();
+		redoList = new ArrayList<>();
 	}
 
 	public void setActionListener(DocumentActivity l) {
@@ -134,6 +167,7 @@ public class PageView extends View implements
 			scrollY = wentBack ? bitmapH - canvasH : 0;
 		}
 		pageScale = zoom;
+		inkList.clear();
 		invalidate();
 	}
 
@@ -149,10 +183,117 @@ public class PageView extends View implements
 			actionListener.onPageViewSizeChanged(w, h);
 	}
 
+	public void setPageTransform(Matrix ctm) {
+		this.ctm = ctm;
+		this.invCtm = new Matrix(ctm).invert();
+	}
+
 	public boolean onTouchEvent(MotionEvent event) {
+		if (annotateMode && invCtm != null) {
+			float x = event.getX();
+			float y = event.getY();
+			float px = (x - getOffsetX()) / viewScale;
+			float py = (y - getOffsetY()) / viewScale;
+			Point p = new Point(px, py).transform(invCtm);
+
+			switch (event.getAction()) {
+				case MotionEvent.ACTION_DOWN:
+					currentStroke = new ArrayList<>();
+					currentStroke.add(p);
+					break;
+				case MotionEvent.ACTION_MOVE:
+					if (currentStroke != null)
+						currentStroke.add(p);
+					break;
+				case MotionEvent.ACTION_UP:
+					if (currentStroke != null) {
+						currentStroke.add(p);
+						inkList.add(currentStroke);
+						redoList.clear();
+						currentStroke = null;
+					}
+					break;
+			}
+			invalidate();
+			return true;
+		}
+
+		if (!annotateMode) {
+			switch (event.getAction()) {
+				case MotionEvent.ACTION_MOVE:
+					if (isSelecting) {
+						float x = (event.getX() - getOffsetX()) * pageScale / viewScale;
+						float y = (event.getY() - getOffsetY()) * pageScale / viewScale;
+						selectionEnd = new Point(x, y);
+						if (actionListener != null)
+							actionListener.onSelectionChanged(selectionStart.x, selectionStart.y, selectionEnd.x, selectionEnd.y);
+					}
+					break;
+				case MotionEvent.ACTION_UP:
+				case MotionEvent.ACTION_CANCEL:
+					if (isSelecting) {
+						isSelecting = false;
+						if (actionListener != null)
+							actionListener.onSelectionEnd();
+					}
+					break;
+			}
+		}
+
 		detector.onTouchEvent(event);
 		scaleDetector.onTouchEvent(event);
 		return true;
+	}
+
+	public void setAnnotateMode(boolean mode) {
+		annotateMode = mode;
+		if (!annotateMode) {
+			inkList.clear();
+			redoList.clear();
+		}
+		invalidate();
+	}
+
+	public void setAnnotateColor(int color) {
+		inkPaint.setColor(color);
+	}
+
+	public void undoAnnotate() {
+		if (inkList.size() > 0) {
+			redoList.add(inkList.remove(inkList.size() - 1));
+			invalidate();
+		}
+	}
+
+	public void redoAnnotate() {
+		if (redoList.size() > 0) {
+			inkList.add(redoList.remove(redoList.size() - 1));
+			invalidate();
+		}
+	}
+
+	public void setSelection(Quad[] quads) {
+		selectedQuads = quads;
+		invalidate();
+	}
+
+	public Point[][] getInkList() {
+		if (inkList.isEmpty())
+			return null;
+		Point[][] list = new Point[inkList.size()][];
+		for (int i = 0; i < inkList.size(); i++) {
+			ArrayList<Point> stroke = inkList.get(i);
+			list[i] = stroke.toArray(new Point[0]);
+		}
+		return list;
+	}
+
+	private int getOffsetX() {
+		return (bitmapW <= canvasW) ? (canvasW - bitmapW) / 2 : -scrollX;
+	}
+
+	private int getOffsetY() {
+		return (bitmapH <= canvasH) ? (canvasH - bitmapH) / 2 : -scrollY;
 	}
 
 	public boolean onDown(MotionEvent e) {
@@ -163,11 +304,29 @@ public class PageView extends View implements
 	public void onShowPress(MotionEvent e) { }
 
 	public void onLongPress(MotionEvent e) {
-		showLinks = !showLinks;
-		invalidate();
+		if (!annotateMode && actionListener != null) {
+			float x = (e.getX() - getOffsetX()) * pageScale / viewScale;
+			float y = (e.getY() - getOffsetY()) * pageScale / viewScale;
+
+			if (actionListener.onAnnotationLongPress(x, y))
+				return;
+
+			isSelecting = true;
+			selectedQuads = null;
+			selectionStart = new Point(x, y);
+			selectionEnd = new Point(x, y);
+			actionListener.onSelectionChanged(x, y, x, y);
+		}
 	}
 
 	public boolean onSingleTapUp(MotionEvent e) {
+		if (annotateMode) return true;
+
+		if (selectedQuads != null && actionListener != null) {
+			actionListener.dismissSelection();
+			return true;
+		}
+
 		boolean foundLink = false;
 		float x = e.getX();
 		float y = e.getY();
@@ -200,17 +359,25 @@ public class PageView extends View implements
 	}
 
 	public synchronized boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
-		if (bitmap != null) {
-			scrollX += (int)dx;
-			scrollY += (int)dy;
-			scroller.forceFinished(true);
-			invalidate();
+		if (bitmap != null && !annotateMode) {
+			if (isSelecting) {
+				float x = (e2.getX() - getOffsetX()) * pageScale / viewScale;
+				float y = (e2.getY() - getOffsetY()) * pageScale / viewScale;
+				selectionEnd = new Point(x, y);
+				if (actionListener != null)
+					actionListener.onSelectionChanged(selectionStart.x, selectionStart.y, selectionEnd.x, selectionEnd.y);
+			} else {
+				scrollX += (int) dx;
+				scrollY += (int) dy;
+				scroller.forceFinished(true);
+				invalidate();
+			}
 		}
 		return true;
 	}
 
 	public synchronized boolean onFling(MotionEvent e1, MotionEvent e2, float dx, float dy) {
-		if (bitmap != null) {
+		if (bitmap != null && !annotateMode) {
 			int maxX = bitmapW > canvasW ? bitmapW - canvasW : 0;
 			int maxY = bitmapH > canvasH ? bitmapH - canvasH : 0;
 			scroller.forceFinished(true);
@@ -221,11 +388,11 @@ public class PageView extends View implements
 	}
 
 	public boolean onScaleBegin(ScaleGestureDetector det) {
-		return true;
+		return !annotateMode;
 	}
 
 	public synchronized boolean onScale(ScaleGestureDetector det) {
-		if (bitmap != null) {
+		if (bitmap != null && !annotateMode) {
 			float focusX = det.getFocusX();
 			float focusY = det.getFocusY();
 			float scaleFactor = det.getScaleFactor();
@@ -245,7 +412,7 @@ public class PageView extends View implements
 	}
 
 	public void onScaleEnd(ScaleGestureDetector det) {
-		if (actionListener != null)
+		if (actionListener != null && !annotateMode)
 			actionListener.onPageViewZoomChanged(viewScale);
 	}
 
@@ -282,6 +449,16 @@ public class PageView extends View implements
 	private android.graphics.Rect dst = new android.graphics.Rect();
 	private Path path = new Path();
 
+	private android.graphics.Matrix fitzToAndroid(Matrix m) {
+		android.graphics.Matrix am = new android.graphics.Matrix();
+		float[] values = new float[9];
+		values[0] = m.a; values[1] = m.c; values[2] = m.e;
+		values[3] = m.b; values[4] = m.d; values[5] = m.f;
+		values[6] = 0;   values[7] = 0;   values[8] = 1;
+		am.setValues(values);
+		return am;
+	}
+
 	public synchronized void onDraw(Canvas canvas) {
 		int x, y;
 
@@ -299,23 +476,8 @@ public class PageView extends View implements
 			invalidate(); /* keep animating */
 		}
 
-		if (bitmapW <= canvasW) {
-			scrollX = 0;
-			x = (canvasW - bitmapW) / 2;
-		} else {
-			if (scrollX < 0) scrollX = 0;
-			if (scrollX > bitmapW - canvasW) scrollX = bitmapW - canvasW;
-			x = -scrollX;
-		}
-
-		if (bitmapH <= canvasH) {
-			scrollY = 0;
-			y = (canvasH - bitmapH) / 2;
-		} else {
-			if (scrollY < 0) scrollY = 0;
-			if (scrollY > bitmapH - canvasH) scrollY = bitmapH - canvasH;
-			y = -scrollY;
-		}
+		x = getOffsetX();
+		y = getOffsetY();
 
 		dst.set(x, y, x + bitmapW, y + bitmapH);
 		canvas.drawBitmap(bitmap, null, dst, null);
@@ -336,13 +498,55 @@ public class PageView extends View implements
 			for (Quad[] h : hits)
 				for (Quad q : h) {
 					path.rewind();
-					path.moveTo(x + q.ul_x * viewScale, y + q.ul_y * viewScale);
-					path.lineTo(x + q.ll_x * viewScale, y + q.ll_y * viewScale);
-					path.lineTo(x + q.lr_x * viewScale, y + q.lr_y * viewScale);
-					path.lineTo(x + q.ur_x * viewScale, y + q.ur_y * viewScale);
+					path.moveTo(x + q.ul_x * viewScale / pageScale, y + q.ul_y * viewScale / pageScale);
+					path.lineTo(x + q.ll_x * viewScale / pageScale, y + q.ll_y * viewScale / pageScale);
+					path.lineTo(x + q.lr_x * viewScale / pageScale, y + q.lr_y * viewScale / pageScale);
+					path.lineTo(x + q.ur_x * viewScale / pageScale, y + q.ur_y * viewScale / pageScale);
 					path.close();
 					canvas.drawPath(path, hitPaint);
 				}
+		}
+
+		if (selectedQuads != null) {
+			for (Quad q : selectedQuads) {
+				path.rewind();
+				path.moveTo(x + q.ul_x * viewScale / pageScale, y + q.ul_y * viewScale / pageScale);
+				path.lineTo(x + q.ll_x * viewScale / pageScale, y + q.ll_y * viewScale / pageScale);
+				path.lineTo(x + q.lr_x * viewScale / pageScale, y + q.lr_y * viewScale / pageScale);
+				path.lineTo(x + q.ur_x * viewScale / pageScale, y + q.ur_y * viewScale / pageScale);
+				path.close();
+				canvas.drawPath(path, selectionPaint);
+			}
+		}
+
+		if (annotateMode && ctm != null) {
+			canvas.save();
+			canvas.translate(x, y);
+			canvas.scale(viewScale, viewScale);
+			canvas.concat(fitzToAndroid(ctm));
+			for (ArrayList<Point> stroke : inkList) {
+				if (stroke.size() > 1) {
+					tempPath.rewind();
+					Point p0 = stroke.get(0);
+					tempPath.moveTo(p0.x, p0.y);
+					for (int i = 1; i < stroke.size(); i++) {
+						Point pi = stroke.get(i);
+						tempPath.lineTo(pi.x, pi.y);
+					}
+					canvas.drawPath(tempPath, inkPaint);
+				}
+			}
+			if (currentStroke != null && currentStroke.size() > 1) {
+				tempPath.rewind();
+				Point p0 = currentStroke.get(0);
+				tempPath.moveTo(p0.x, p0.y);
+				for (int i = 1; i < currentStroke.size(); i++) {
+					Point pi = currentStroke.get(i);
+					tempPath.lineTo(pi.x, pi.y);
+				}
+				canvas.drawPath(tempPath, inkPaint);
+			}
+			canvas.restore();
 		}
 	}
 }
