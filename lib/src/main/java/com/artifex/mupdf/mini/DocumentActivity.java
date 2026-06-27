@@ -61,7 +61,7 @@ import java.util.Stack;
 
 public class DocumentActivity extends Activity
 {
-	private final String APP = "MuPDF";
+	private final String APP = "SimPDF";
 
 	public final int NAVIGATE_REQUEST = 1;
 

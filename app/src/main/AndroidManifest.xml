@@ -3,8 +3,8 @@
 	android:installLocation="auto"
 	>
 	<application
-		android:label="MuPDF mini"
-		android:icon="@drawable/ic_mupdf"
+		android:label="SimPDF"
+		android:icon="@drawable/ic_simpdf"
 		>
 		<activity
 			android:name=".LibraryActivity"

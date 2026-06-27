@@ -24,7 +24,7 @@ public class PageView extends View implements
 	GestureDetector.OnGestureListener,
 	ScaleGestureDetector.OnScaleGestureListener
 {
-	private final String APP = "MuPDF";
+	private final String APP = "SimPDF";
 
 	protected DocumentActivity actionListener;
 

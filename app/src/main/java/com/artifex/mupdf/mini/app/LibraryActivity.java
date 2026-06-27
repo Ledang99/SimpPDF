@@ -11,7 +11,7 @@ import com.artifex.mupdf.mini.DocumentActivity;
 
 public class LibraryActivity extends Activity
 {
-	private final String APP = "MuPDF";
+	private final String APP = "SimPDF";
 
 	protected final int FILE_REQUEST = 42;
 	protected boolean selectingDocument;
