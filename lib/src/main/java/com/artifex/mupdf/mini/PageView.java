@@ -6,6 +6,8 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
@@ -53,6 +55,7 @@ public class PageView extends View implements
 
 	protected boolean annotateMode;
 	protected Paint inkPaint;
+	protected Paint themePaint;
 	protected ArrayList<ArrayList<Point>> inkList;
 	protected ArrayList<ArrayList<Point>> redoList;
 	protected ArrayList<Point> currentStroke;
@@ -101,6 +104,10 @@ public class PageView extends View implements
 		inkPaint.setStrokeCap(Paint.Cap.ROUND);
 		inkPaint.setStrokeJoin(Paint.Join.ROUND);
 		inkPaint.setAntiAlias(true);
+
+		themePaint = new Paint();
+		themePaint.setAntiAlias(true);
+		themePaint.setFilterBitmap(true);
 
 		inkList = new ArrayList<>();
 		redoList = new ArrayList<>();
@@ -459,6 +466,40 @@ public class PageView extends View implements
 		return am;
 	}
 
+	public void setTheme(int theme) {
+		if (theme == 0) { // Light
+			themePaint.setColorFilter(null);
+			setBackgroundColor(0xFF505050);
+		} else if (theme == 1) { // Grey
+			float[] matrix = {
+				-1, 0, 0, 0, 255, // red
+				0, -1, 0, 0, 255, // green
+				0, 0, -1, 0, 255, // blue
+				0, 0, 0, 1, 0     // alpha
+			};
+			// Scale the inverted colors to a greyish tone
+			float scale = 0.7f;
+			for (int i = 0; i < 15; i++) matrix[i] *= scale;
+			// Add some constant to avoid total black
+			matrix[4] += 50;
+			matrix[9] += 50;
+			matrix[14] += 50;
+
+			themePaint.setColorFilter(new ColorMatrixColorFilter(matrix));
+			setBackgroundColor(0xFF333333);
+		} else if (theme == 2) { // Black
+			float[] matrix = {
+				-1, 0, 0, 0, 255,
+				0, -1, 0, 0, 255,
+				0, 0, -1, 0, 255,
+				0, 0, 0, 1, 0
+			};
+			themePaint.setColorFilter(new ColorMatrixColorFilter(matrix));
+			setBackgroundColor(0xFF000000);
+		}
+		invalidate();
+	}
+
 	public synchronized void onDraw(Canvas canvas) {
 		int x, y;
 
@@ -480,7 +521,7 @@ public class PageView extends View implements
 		y = getOffsetY();
 
 		dst.set(x, y, x + bitmapW, y + bitmapH);
-		canvas.drawBitmap(bitmap, null, dst, null);
+		canvas.drawBitmap(bitmap, null, dst, themePaint);
 
 		if (showLinks && linkBounds != null) {
 			for (Rect b : linkBounds) {

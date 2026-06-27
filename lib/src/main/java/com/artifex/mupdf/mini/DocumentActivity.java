@@ -101,6 +101,7 @@ public class DocumentActivity extends Activity
 	protected View searchCloseButton;
 	protected View searchBackwardButton;
 	protected View searchForwardButton;
+	protected View themeButton;
 	protected View zoomButton;
 	protected View layoutButton;
 	protected PopupMenu layoutPopupMenu;
@@ -114,6 +115,7 @@ public class DocumentActivity extends Activity
 
 	protected boolean pageCountChanged;
 	protected int pageCount;
+	protected int currentTheme;
 	protected int currentPage;
 	protected int searchHitPage;
 	protected String searchNeedle;
@@ -279,6 +281,9 @@ public class DocumentActivity extends Activity
 		pageView = (PageView)findViewById(R.id.page_view);
 		pageView.setActionListener(this);
 
+		currentTheme = prefs.getInt("theme", 0);
+		pageView.setTheme(currentTheme);
+
 		pageLabel = (TextView)findViewById(R.id.page_label);
 		pageSeekbar = (SeekBar)findViewById(R.id.page_seekbar);
 		pageSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -358,6 +363,14 @@ public class DocumentActivity extends Activity
 			public void onClick(View v) {
 				fitPage = !fitPage;
 				loadPage();
+			}
+		});
+
+		themeButton = findViewById(R.id.theme_button);
+		themeButton.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				currentTheme = (currentTheme + 1) % 3;
+				pageView.setTheme(currentTheme);
 			}
 		});
 
@@ -1013,6 +1026,7 @@ public class DocumentActivity extends Activity
 			SharedPreferences.Editor editor = prefs.edit();
 			editor.putFloat("layoutEm", layoutEm);
 			editor.putBoolean("fitPage", fitPage);
+			editor.putInt("theme", currentTheme);
 			editor.putInt(key, currentPage);
 			editor.apply();
 		}

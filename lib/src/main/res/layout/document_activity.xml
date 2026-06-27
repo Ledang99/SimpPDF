@@ -53,6 +53,13 @@
 					android:src="@drawable/ic_zoom_out_map_white_24dp"
 					android:visibility="gone"
 					/>
+			<ImageButton android:id="@+id/theme_button"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:layout_gravity="center"
+					android:background="@drawable/button"
+					android:src="@drawable/ic_theme_white_24dp"
+					/>
 			<ImageButton android:id="@+id/layout_button"
 					android:layout_width="wrap_content"
 					android:layout_height="wrap_content"
