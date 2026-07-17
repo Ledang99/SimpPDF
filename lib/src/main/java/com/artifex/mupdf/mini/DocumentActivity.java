@@ -573,6 +573,7 @@ public class DocumentActivity extends Activity
 
 	protected void saveAnnotations() {
 		final Point[][] inkList = pageView.getInkList();
+		final float inkStrokeWidth = pageView.getInkStrokeWidth();
 		if (inkList == null) {
 			annotateMode = false;
 			pageView.setAnnotateMode(false);
@@ -588,6 +589,7 @@ public class DocumentActivity extends Activity
 					PDFAnnotation annot = page.createAnnotation(PDFAnnotation.TYPE_INK);
 					annot.setInkList(inkList);
 					annot.setColor(annotateColor);
+					annot.setBorderWidth(inkStrokeWidth);
 					annot.update();
 					page.update();
 					page.destroy();
