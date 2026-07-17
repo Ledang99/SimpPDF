@@ -433,6 +433,7 @@ public class DocumentActivity extends Activity
 						}
 					});
 					builder.show();
+				} else {
 					if (selectionPopup != null)
 						selectionPopup.dismiss();
 
@@ -540,6 +541,7 @@ public class DocumentActivity extends Activity
 
 					selectionPopup = new PopupWindow(layout, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 					selectionPopup.setOutsideTouchable(true);
+					selectionPopup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
 					selectionPopup.showAtLocation(pageView, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, (int)(100 * displayDPI / 160));
 				}
 			}

@@ -12,7 +12,7 @@ import android.view.View;
 
 public class ColorSpectrumView extends View {
     private Paint paint;
-    private int[] colors = {Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED};
+    private final int[] colors = {Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED};
     private OnColorSelectedListener listener;
 
     public interface OnColorSelectedListener {
@@ -39,9 +39,16 @@ public class ColorSpectrumView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        LinearGradient gradient = new LinearGradient(0, 0, getWidth(), 0, colors, null, Shader.TileMode.CLAMP);
-        paint.setShader(gradient);
+        if (getWidth() > 0) {
+            LinearGradient gradient = new LinearGradient(0, 0, getWidth(), 0, colors, null, Shader.TileMode.CLAMP);
+            paint.setShader(gradient);
+        }
         canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
+    }
+
+    @Override
+    public boolean performClick() {
+        return super.performClick();
     }
 
     @Override
@@ -52,11 +59,14 @@ public class ColorSpectrumView extends View {
             if (width <= 0) return true;
             if (x < 0) x = 0;
             if (x > width) x = width;
-            
+
             float ratio = x / width;
             int color = getColorAt(ratio);
             if (listener != null) {
                 listener.onColorSelected(color);
+            }
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                performClick();
             }
             return true;
         }
