@@ -265,6 +265,14 @@ public class PageView extends View implements
 		inkPaint.setColor(color);
 	}
 
+	public void setInkStrokeWidth(float width) {
+		inkPaint.setStrokeWidth(width);
+	}
+
+	public float getInkStrokeWidth() {
+		return inkPaint.getStrokeWidth();
+	}
+
 	public void undoAnnotate() {
 		if (inkList.size() > 0) {
 			redoList.add(inkList.remove(inkList.size() - 1));

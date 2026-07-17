@@ -433,46 +433,110 @@ public class DocumentActivity extends Activity
 						}
 					});
 					builder.show();
-				} else {
-					final float[][] colorValues = {{1,0,0}, {1,1,0}, {0,1,0}, {0,0,1}};
-					final int[] androidColors = {0xFFFF0000, 0xFFFFFF00, 0xFF00FF00, 0xFF0000FF};
-
 					if (selectionPopup != null)
 						selectionPopup.dismiss();
 
 					LinearLayout layout = new LinearLayout(DocumentActivity.this);
-					layout.setOrientation(LinearLayout.HORIZONTAL);
+					layout.setOrientation(LinearLayout.VERTICAL);
 					layout.setBackgroundColor(0xCCFFFFFF);
 					int padding = (int)(10 * displayDPI / 160);
 					layout.setPadding(padding, padding, padding, padding);
 
-					for (int i = 0; i < androidColors.length; i++) {
-						final int index = i;
-						TextView tv = new TextView(DocumentActivity.this);
-						tv.setText("");
-						tv.setGravity(Gravity.CENTER);
-						GradientDrawable gd = new GradientDrawable();
-						gd.setShape(GradientDrawable.OVAL);
-						gd.setColor(androidColors[i]);
-						int size = (int)(40 * displayDPI / 160);
-						gd.setSize(size, size);
-						tv.setBackground(gd);
-						LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
-						lp.setMargins(padding, 0, padding, 0);
-						tv.setLayoutParams(lp);
-						tv.setOnClickListener(new View.OnClickListener() {
-							public void onClick(View v) {
-								annotateColor = colorValues[index];
-								annotateMode = true;
-								pageView.setAnnotateMode(true);
-								pageView.setAnnotateColor(androidColors[index]);
-								((ImageButton)annotateButton).setColorFilter(androidColors[index]);
-								Toast.makeText(DocumentActivity.this, "Annotation mode: ON", Toast.LENGTH_SHORT).show();
-								selectionPopup.dismiss();
+					ColorSpectrumView spectrum = new ColorSpectrumView(DocumentActivity.this);
+					LinearLayout.LayoutParams spectrumParams = new LinearLayout.LayoutParams((int)(240 * displayDPI / 160), (int)(40 * displayDPI / 160));
+					spectrumParams.setMargins(0, 0, 0, padding);
+					spectrum.setLayoutParams(spectrumParams);
+					layout.addView(spectrum);
+
+					LinearLayout controls = new LinearLayout(DocumentActivity.this);
+					controls.setOrientation(LinearLayout.HORIZONTAL);
+					controls.setGravity(Gravity.CENTER_VERTICAL);
+
+					final View colorIndicator = new View(DocumentActivity.this);
+					int indicatorSize = (int)(30 * displayDPI / 160);
+					LinearLayout.LayoutParams indicatorParams = new LinearLayout.LayoutParams(indicatorSize, indicatorSize);
+					colorIndicator.setLayoutParams(indicatorParams);
+					colorIndicator.setBackgroundColor(Color.RED);
+					controls.addView(colorIndicator);
+
+					TextView minus = new TextView(DocumentActivity.this);
+					minus.setText("-");
+					minus.setTextSize(24);
+					minus.setPadding(padding, 0, padding, 0);
+					minus.setTextColor(Color.BLACK);
+					controls.addView(minus);
+
+					final TextView sizeLabel = new TextView(DocumentActivity.this);
+					sizeLabel.setText(String.valueOf((int)pageView.getInkStrokeWidth()));
+					sizeLabel.setTextSize(18);
+					sizeLabel.setTextColor(Color.BLACK);
+					controls.addView(sizeLabel);
+
+					TextView plus = new TextView(DocumentActivity.this);
+					plus.setText("+");
+					plus.setTextSize(24);
+					plus.setPadding(padding, 0, padding, 0);
+					plus.setTextColor(Color.BLACK);
+					controls.addView(plus);
+
+					TextView ok = new TextView(DocumentActivity.this);
+					ok.setText("OK");
+					ok.setTextSize(18);
+					ok.setPadding(padding, 0, padding, 0);
+					ok.setTextColor(Color.BLUE);
+					controls.addView(ok);
+
+					layout.addView(controls);
+
+					final int[] selectedColor = {Color.RED};
+
+					spectrum.setOnColorSelectedListener(new ColorSpectrumView.OnColorSelectedListener() {
+						@Override
+						public void onColorSelected(int color) {
+							selectedColor[0] = color;
+							colorIndicator.setBackgroundColor(color);
+						}
+					});
+
+					minus.setOnClickListener(new View.OnClickListener() {
+						@Override
+						public void onClick(View v) {
+							float w = pageView.getInkStrokeWidth();
+							if (w > 1) {
+								pageView.setInkStrokeWidth(w - 1);
+								sizeLabel.setText(String.valueOf((int)pageView.getInkStrokeWidth()));
 							}
-						});
-						layout.addView(tv);
-					}
+						}
+					});
+
+					plus.setOnClickListener(new View.OnClickListener() {
+						@Override
+						public void onClick(View v) {
+							float w = pageView.getInkStrokeWidth();
+							if (w < 50) {
+								pageView.setInkStrokeWidth(w + 1);
+								sizeLabel.setText(String.valueOf((int)pageView.getInkStrokeWidth()));
+							}
+						}
+					});
+
+					ok.setOnClickListener(new View.OnClickListener() {
+						@Override
+						public void onClick(View v) {
+							int color = selectedColor[0];
+							annotateColor = new float[] {
+								Color.red(color) / 255.0f,
+								Color.green(color) / 255.0f,
+								Color.blue(color) / 255.0f
+							};
+							annotateMode = true;
+							pageView.setAnnotateMode(true);
+							pageView.setAnnotateColor(color);
+							((ImageButton)annotateButton).setColorFilter(color);
+							Toast.makeText(DocumentActivity.this, "Annotation mode: ON", Toast.LENGTH_SHORT).show();
+							selectionPopup.dismiss();
+						}
+					});
 
 					selectionPopup = new PopupWindow(layout, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 					selectionPopup.setOutsideTouchable(true);
